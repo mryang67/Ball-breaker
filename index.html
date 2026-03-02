@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body {
+      background: #faf8ef;
+      margin: 0;
+      padding: 0;
+    }
+
+    canvas {
+      border: 2px solid black;
+      margin: 0 auto;
+      display: block;
+    }
+
+    button {
+      border-radius: 5px;
+      font-size: 1.5em;
+      display: block;
+      margin: 10 auto;
+    }
+  </style>
+</head>
+
+<body>
+  <canvas id="canvas" width="720" height="800"></canvas>
+  <button onclick="gameManager.downBalls()">Drop balls</button>
+
+  <script>
+    // --- Utility functions ---
+    function randomInt(...args) {
+      if (args.length === 1) return Math.ceil(Math.random() * args[0]);
+      if (args.length === 2) return Math.ceil(Math.random() * (args[1] - args[0])) + args[0];
+    }
+
+    function random(...args) {
+      if (args.length === 1) return Math.random() * args[0];
+      if (args.length === 2) return Math.random() * (args[1] - args[0]) + args[0];
+    }
+
+    const range = (n, m) => {
+      if (arguments.length === 1) return Array.from({ length: n }, (_, i) => i);
+      if (arguments.length === 2) return Array.from({ length: Math.abs(m - n) + 1 }, (_, i) => n + i);
+    };
+
+    function normalize(n) { return n < 0 ? -1 : n > 0 ? 1 : 0; }
+    function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+    function between(v, min, max) { return min <= v && v <= max; }
+    const delay = (n) => new Promise(r => setTimeout(r, n));
+
+    // --- Vector ---
+    class Vector {
+      constructor(x = 0, y = 0) { this.x = x; this.y = y; }
+      add(v) { this.x += v.x; this.y += v.y; }
+      sub(v) { this.x -= v.x; this.y -= v.y; }
+      mult(n) { this.x *= n; this.y *= n; }
+      mag() { return Math.sqrt(this.x * this.x + this.y * this.y); }
+      get() { return new Vector(this.x, this.y); }
+      copy() { return new Vector(this.x, this.y); }
+      normalize() { this.x = normalize(this.x); this.y = normalize(this.y); }
+    }
+    Vector.mult = (v, n) => new Vector(v.x * n, v.y * n);
+    Vector.div = (v, n) => new Vector(v.x / n, v.y / n);
+
+    // --- Canvas setup ---
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const width = 710, height = 880, uiOffsetY = 80;
+    canvas.width = width; canvas.height = height;
+
+    function clear() { ctx.clearRect(0, 0, width, height); }
+    function line(x1, y1, x2, y2, color = "#000") { ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
+    function dashLine(x1, y1, x2, y2) { ctx.beginPath(); ctx.setLineDash([5, 15]); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.setLineDash([]); }
+    function fillRect(x, y, w, h, color = "#171717") { ctx.fillStyle = color; ctx.fillRect(x, y, w, h); ctx.stroke(); }
+
+    function circle(x, y, r, color = "#000") { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = color; ctx.strokeStyle = color; ctx.fill(); ctx.stroke(); }
+
+    function shuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+    // --- Mouse ---
+    const Mouse = { position: new Vector(0, 0) };
+    canvas.addEventListener("mousemove", e => {
+      const mx = e.pageX - canvas.offsetLeft;
+      const my = e.pageY;
+      Mouse.position = new Vector(mx, my);
+    });
+
+    // --- Ball class ---
+    class Ball {
+      constructor(mass, x, y) {
+        this.position = new Vector(x, y);
+        this.velocity = new Vector(0, 0);
+        this.acceleration = new Vector(0, 0);
+        this.mass = mass;
+        this.r = this.mass * 8;
+        this.showDirection = true;
+        this.downing = false;
+      }
+      setOnStop(f) { this.onStop = f; }
+      applyForce(force) { const f = Vector.div(force, this.mass); this.acceleration.add(f); }
+      update() { this.velocity.add(this.acceleration); this.position.add(this.velocity); this.acceleration.mult(0); }
+      down() { this.downing = true; this.velocity = new Vector(0, 50); } // faster drop
+      shoot(mousePos) { this.showDirection = false; const force = this.calcBallVelocity(this.angle(mousePos)); this.applyForce(force); }
+      calcBallVelocity(angle) { return new Vector(100 * Math.cos(angle) * 0.3, 100 * Math.sin(angle) * 0.3); }
+      angle(mousePos) { return Math.atan2(mousePos.y - this.position.y, mousePos.x - this.position.x); }
+      display() { circle(this.position.x, this.position.y, this.r, "#5ba7f4"); }
+      checkEdges() {
+        if (this.position.x > width) { this.position.x = width; this.velocity.x *= -1; }
+        else if (this.position.x < 0) { this.position.x = 0; this.velocity.x *= -1; }
+        if (this.position.y > height - 100 && !this.downing) { this.velocity.y *= -1; this.position.y = height - 100; if (this.onStop) this.onStop(this); }
+        if (this.position.y < 100) { this.velocity.y *= -1; this.position.y = 100; }
+      }
+    }
+
+    // --- Balls manager ---
+    class Balls {
+      constructor(state) {
+        this.state = state;
+        this.balls = [new Ball(2, state.ballPos.x, state.ballPos.y)];
+        this.balls.forEach(ball => ball.setOnStop(ball => { this.state.ballPos = ball.position.copy(); }));
+      }
+      down() { this.balls.forEach(ball => ball.down()); }
+      display() { this.balls.forEach(ball => { ball.update(); ball.checkEdges(); ball.display(); }); }
+    }
+
+    // --- Ball line for aiming ---
+    class BallLine { display(state) { if (!state.ballMoving && state.ballPos) dashLine(state.ballPos.x, state.ballPos.y, Mouse.position.x, Math.min(Mouse.position.y, 720)); } }
+
+    // --- UI ---
+    class UI { display(state) { line(0, uiOffsetY, width, uiOffsetY); line(0, height - uiOffsetY, width, height - uiOffsetY); ctx.fillText(`Balls: ${state.ballCount || 1}`, 30, height - 40); } }
+
+    // --- Game manager ---
+    class GameManager {
+      constructor() {
+        this.state = { ballPos: new Vector(width / 2, height - 120), ballMoving: false, ballDowning: false, ballCount: 1 };
+        this.balls = new Balls(this.state);
+        this.ballLine = new BallLine();
+        this.ui = new UI();
+        this.run();
+      }
+      downBalls() { this.state.ballDowning = true; this.balls.down(); }
+      draw() { clear(); this.ballLine.display(this.state); this.balls.display(); this.ui.display(this.state); }
+      run() { this.draw(); requestAnimationFrame(() => this.run()); }
+    }
+
+    const gameManager = new GameManager();
+  </script>
+</body>
+</html>
