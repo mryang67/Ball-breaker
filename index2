@@ -1,0 +1,61 @@
+from copy import deepcopy
+
+opponent = {'X':'O','O':'X'}
+
+generated_boards = []
+
+def board_id (board):
+    return ''.join([''.join(row) for row in board])
+
+def winning (board, player):
+    return player == board[0][0] == board[0][1] == board[0][2] \
+        or player == board[1][0] == board[1][1] == board[1][2] \
+        or player == board[2][0] == board[2][1] == board[2][2] \
+        or player == board[0][0] == board[1][0] == board[2][0] \
+        or player == board[0][1] == board[1][1] == board[2][1] \
+        or player == board[0][2] == board[1][2] == board[2][2] \
+        or player == board[0][0] == board[1][1] == board[2][2] \
+        or player == board[0][2] == board[1][1] == board[2][0]
+
+def full (board):
+    return '_' not in [cell for row in board for cell in row]
+
+def print_board (board, player):
+    print(f'<hr id="{board_id(board)}">', end="")
+    links = True
+    if winning(board, opponent[player]):
+        links = False
+        print('WIN:')
+    elif full(board):
+        links = False
+        print('DRAW:')
+    for row in range(0, 3):
+        for col in range(0, 3):
+            if links and board[row][col] == '_':
+                board[row][col] = player
+                print(f'<a href="#{board_id(board)}">_</a>', end="")
+                board[row][col] = '_'
+            else:
+                print(f'{board[row][col]}', end="")
+        if row != 2: print('')
+    return links
+
+def next_boards (board, player):
+    boards = []
+    for row in range(0, 3):
+        for col in range(0, 3):
+            if board[row][col] == '_':
+                board[row][col] = player
+                bid = board_id(board)
+                if bid not in generated_boards:
+                    boards.append(deepcopy(board))
+                    generated_boards.append(bid)
+                board[row][col] = '_'
+    return boards
+
+def print_boards (board, player):
+    if not print_board(board, player): return
+    for board in next_boards(board, player):
+        print_boards(board, opponent[player])
+print('<pre>')
+print_boards([['_' for _ in range(0, 3)] for _ in range(0, 3)], 'X')
